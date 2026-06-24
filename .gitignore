@@ -1,0 +1,22 @@
+# Secretos: NUNCA subir la API key
+.env
+
+# Datos locales del usuario (resultados ingresados)
+resultados.json
+ko_resultados.json
+
+# Archivos compilados de Python (se regeneran solos)
+__pycache__/
+*.pyc
+*.pyo
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+
+# Archivos de editor / sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
