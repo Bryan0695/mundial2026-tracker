@@ -280,31 +280,34 @@
     ["England","Ghana"],["Ecuador","Germany"],["Scotland","Brazil"],
     ["Argentina","Austria"],["Spain","Saudi Arabia"],["Netherlands","Sweden"],
   ];
-  const ALL_TEAMS = ["Argentina","France","Spain","Brazil","England","Portugal",
-    "Netherlands","Germany","Belgium","Croatia","Morocco","Colombia",
-    "Uruguay","Japan","USA","Mexico","Switzerland","Senegal","Norway","Ecuador",
-    "Austria","Egypt","Ivory Coast","Korea Republic","Australia","Canada","Sweden",
-    "Iran","Paraguay","Czechia","Scotland","Algeria","Bosnia and Herzegovina",
-    "Ghana","Tunisia","Congo DR","Saudi Arabia","Qatar","Cape Verde","South Africa",
-    "Panama","Uzbekistan","Iraq","Jordan","New Zealand","Curacao","Turkiye"];
+  // El universo de equipos ya no se hardcodea aqui: se carga desde
+  // /api/teams (fuente unica en teams.py). loadTeams() los rellena al iniciar.
+  let ALL_TEAMS = [];   // nombres en ingles para los <select> de partido manual
+  let ISO = {};         // { nombre_en: codigo_iso } para las banderas flag-icons
 
   const statusEl = document.getElementById('status');
 
-  // Codigo ISO por equipo para flag-icons (clase "fi fi-XX").
-  const ISO = {
-    "Mexico":"mx","Korea Republic":"kr","Czechia":"cz","South Africa":"za",
-    "Canada":"ca","Switzerland":"ch","Bosnia and Herzegovina":"ba","Qatar":"qa",
-    "Brazil":"br","Morocco":"ma","Scotland":"gb-sct","Haiti":"ht",
-    "USA":"us","Australia":"au","Paraguay":"py","Turkiye":"tr",
-    "Germany":"de","Ivory Coast":"ci","Ecuador":"ec","Curacao":"cw",
-    "Netherlands":"nl","Japan":"jp","Sweden":"se","Tunisia":"tn",
-    "Egypt":"eg","Iran":"ir","Belgium":"be","New Zealand":"nz",
-    "Spain":"es","Uruguay":"uy","Cape Verde":"cv","Saudi Arabia":"sa",
-    "France":"fr","Norway":"no","Senegal":"sn","Iraq":"iq",
-    "Argentina":"ar","Austria":"at","Algeria":"dz","Jordan":"jo",
-    "Colombia":"co","Portugal":"pt","Congo DR":"cd","Uzbekistan":"uz",
-    "England":"gb-eng","Ghana":"gh","Croatia":"hr","Panama":"pa"
-  };
+  // Carga el dataset de equipos desde el backend y construye los lookups.
+  async function loadTeams(){
+    try{
+      const data = await (await fetch(`${BACKEND}/api/teams`)).json();
+      const t = data.teams || {};
+      ISO = {};
+      Object.keys(t).forEach(name => { ISO[name] = t[name].iso; });
+      // Orden alfabetico por nombre en espanol para el desplegable.
+      ALL_TEAMS = Object.keys(t).sort((a,b)=>(t[a].es||a).localeCompare(t[b].es||b));
+    }catch(e){ /* backend apagado: ISO/ALL_TEAMS quedan vacios hasta reconectar */ }
+  }
+  // Garantiza que el lookup de equipos este cargado ANTES de renderizar.
+  // Si la primera carga fallo (p.ej. abriste el HTML antes de arrancar el
+  // backend), reintenta aqui; asi pulsar "Actualizar" recupera las banderas
+  // sin tener que recargar la pagina.
+  async function ensureTeams(){
+    if(Object.keys(ISO).length === 0){
+      await loadTeams();
+      fillSelects();  // rellena los <select> en cuanto haya equipos
+    }
+  }
   // Devuelve el HTML de la bandera de un equipo (por nombre en ingles).
   function flagHTML(team){
     const code = ISO[team];
@@ -627,11 +630,16 @@
   }
 
   async function refreshAll(){
+    await ensureTeams();  // banderas/nombres listos antes del primer render
     try{ await fetch(`${BACKEND}/api/ranking`); setStatus(true); }catch(e){ setStatus(false); }
     renderCalendar(); renderGroups(); renderThirds(); renderR32(); renderBracket(); renderMatches(); renderRanking();
   }
-  fillSelects();
-  refreshAll();
+  // Arranque: primero carga los equipos (banderas + selects), luego renderiza.
+  async function init(){
+    await ensureTeams();
+    refreshAll();
+  }
+  init();
 </script>
 </body>
 </html>

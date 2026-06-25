@@ -25,18 +25,25 @@ No requiere librerias pesadas: solo math de la libreria estandar.
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass, field
 
 
-# --- Parametros del modelo (ajustables) ------------------------------------
+# --- Configuracion del modelo (ajustable sin tocar codigo) -----------------
+# Todos los parametros se pueden calibrar con variables de entorno usando los
+# valores de abajo como default. Asi se puede afinar el motor (p.ej. exportar
+# ELO_K=50) sin editar este archivo. La firma publica de PredictionEngine no
+# cambia: si no construyes un config, usa estos defaults.
 
-ELO_K = 40.0            # cuanto se mueve el rating por partido (torneo: 40-60)
-ELO_HOME_ADV = 65.0     # ventaja de jugar "en casa" (sede local CONCACAF)
-HOME_GOAL_BASE = 1.45   # goles esperados base del equipo local
-AWAY_GOAL_BASE = 1.15   # goles esperados base del visitante
-ELO_TO_GOALS = 0.0035   # factor que convierte diferencia Elo en goles
-RHO = -0.13             # parametro de correccion Dixon-Coles para marcadores bajos
-MAX_GOALS = 8           # tope de goles a considerar en la matriz de probabilidad
+@dataclass
+class ModelConfig:
+    elo_k: float = float(os.getenv("ELO_K", "40.0"))                 # cuanto se mueve el rating por partido (torneo: 40-60)
+    elo_home_adv: float = float(os.getenv("ELO_HOME_ADV", "65.0"))   # ventaja de jugar "en casa" (sede local CONCACAF)
+    home_goal_base: float = float(os.getenv("HOME_GOAL_BASE", "1.45"))  # goles esperados base del equipo local
+    away_goal_base: float = float(os.getenv("AWAY_GOAL_BASE", "1.15"))  # goles esperados base del visitante
+    elo_to_goals: float = float(os.getenv("ELO_TO_GOALS", "0.0035"))    # factor que convierte diferencia Elo en goles
+    rho: float = float(os.getenv("RHO", "-0.13"))                    # correccion Dixon-Coles para marcadores bajos
+    max_goals: int = int(os.getenv("MAX_GOALS", "8"))                # tope de goles en la matriz de probabilidad
 
 
 # Ratings Elo iniciales (junio 2026, aproximados al ranking FIFA real).
@@ -66,6 +73,7 @@ DEFAULT_ELO = 1700.0  # para cualquier seleccion no listada
 class PredictionEngine:
     """Mantiene los ratings y produce/actualiza predicciones."""
     elo: dict[str, float] = field(default_factory=lambda: dict(INITIAL_ELO))
+    config: ModelConfig = field(default_factory=ModelConfig)
 
     def get_elo(self, team: str) -> float:
         return self.elo.get(team, DEFAULT_ELO)
@@ -79,14 +87,15 @@ class PredictionEngine:
         """
         eh = self.get_elo(home)
         ea = self.get_elo(away)
+        cfg = self.config
 
         # Ventaja de campo solo si NO es cancha neutral.
-        home_adv = 0.0 if neutral else ELO_HOME_ADV
+        home_adv = 0.0 if neutral else cfg.elo_home_adv
         diff = (eh + home_adv) - ea
 
         # Goles esperados (lambda) de cada equipo, derivados de la diferencia Elo.
-        lambda_home = max(0.15, HOME_GOAL_BASE + diff * ELO_TO_GOALS)
-        lambda_away = max(0.15, AWAY_GOAL_BASE - diff * ELO_TO_GOALS)
+        lambda_home = max(0.15, cfg.home_goal_base + diff * cfg.elo_to_goals)
+        lambda_away = max(0.15, cfg.away_goal_base - diff * cfg.elo_to_goals)
 
         # Matriz de probabilidad de cada marcador con correccion Dixon-Coles.
         p_home, p_draw, p_away, best_score, stats = self._score_matrix(lambda_home, lambda_away)
@@ -116,6 +125,7 @@ class PredictionEngine:
         Construye la matriz de Poisson + correccion Dixon-Coles y calcula
         de paso todas las estadisticas de goles (over/under, BTTS, clean sheets).
         """
+        cfg = self.config
         p_home = p_draw = p_away = 0.0
         best_p = -1.0
         best_score = (0, 0)
@@ -127,9 +137,9 @@ class PredictionEngine:
         p_home_cs = 0.0       # visitante no marca -> local clean sheet
         p_away_cs = 0.0       # local no marca -> visitante clean sheet
 
-        for i in range(MAX_GOALS + 1):
-            for j in range(MAX_GOALS + 1):
-                p = _poisson(i, lh) * _poisson(j, la) * _dc_tau(i, j, lh, la, RHO)
+        for i in range(cfg.max_goals + 1):
+            for j in range(cfg.max_goals + 1):
+                p = _poisson(i, lh) * _poisson(j, la) * _dc_tau(i, j, lh, la, cfg.rho)
                 scores.append((p, i, j))
                 if p > best_p:
                     best_p = p
@@ -192,7 +202,7 @@ class PredictionEngine:
         eh = self.get_elo(home)
         ea = self.get_elo(away)
 
-        home_adv = 0.0 if neutral else ELO_HOME_ADV
+        home_adv = 0.0 if neutral else self.config.elo_home_adv
 
         # Resultado esperado (0 a 1) segun Elo, formula estandar.
         exp_home = 1.0 / (1.0 + 10 ** (-((eh + home_adv) - ea) / 400.0))
@@ -210,8 +220,8 @@ class PredictionEngine:
         margin = abs(home_goals - away_goals)
         g_mult = math.log(margin + 1) + 1  # 0->1, 1->1.69, 3->2.39 ...
 
-        new_eh = eh + ELO_K * g_mult * (score_home - exp_home)
-        new_ea = ea + ELO_K * g_mult * (score_away - exp_away)
+        new_eh = eh + self.config.elo_k * g_mult * (score_home - exp_home)
+        new_ea = ea + self.config.elo_k * g_mult * (score_away - exp_away)
 
         self.elo[home] = round(new_eh, 1)
         self.elo[away] = round(new_ea, 1)

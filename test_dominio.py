@@ -9,6 +9,7 @@ Instala pytest primero:  pip install pytest
 
 import prediction
 import tournament
+import teams
 
 
 # --- Tests del motor de prediccion -----------------------------------------
@@ -149,3 +150,55 @@ def test_bracket_propaga_ganador():
     # El ganador de P73 alimenta P90 (segun estructura oficial).
     p90 = next(m for m in b["rounds"]["r16"]["matches"] if m["code"] == "P90")
     assert p73["winner"] in (p90["home"], p90["away"])
+
+
+# --- Tests de la fuente unica de equipos (teams.py) ------------------------
+
+def test_teams_son_48():
+    """El universo de selecciones del Mundial tiene exactamente 48 equipos."""
+    assert len(teams.TEAMS) == 48
+
+
+def test_no_hay_equipos_duplicados():
+    """No debe haber nombres (name) repetidos en TEAMS."""
+    names = [t.name for t in teams.TEAMS]
+    assert len(names) == len(set(names)), "Hay equipos duplicados en TEAMS"
+
+
+def test_grupos_completos():
+    """GROUPS derivado tiene 12 grupos (A-L), cada uno con 4 equipos."""
+    assert sorted(teams.GROUPS.keys()) == list("ABCDEFGHIJKL")
+    for letter, equipos in teams.GROUPS.items():
+        assert len(equipos) == 4, f"El grupo {letter} no tiene 4 equipos"
+
+
+def test_todos_tienen_iso_y_es():
+    """Cada equipo debe tener iso, es y emoji no vacios."""
+    for t in teams.TEAMS:
+        assert t.iso, f"{t.name} sin iso"
+        assert t.es, f"{t.name} sin nombre en espanol"
+        assert t.emoji, f"{t.name} sin emoji"
+
+
+def test_groups_derivado_coincide():
+    """teams.GROUPS debe coincidir con tournament.GROUPS (re-export sincronizado)."""
+    assert teams.GROUPS == tournament.GROUPS
+
+
+def test_as_dataset_forma():
+    """as_dataset() devuelve 48 entradas con claves es/iso/emoji/group (sin name)."""
+    ds = teams.as_dataset()
+    assert len(ds) == 48
+    for name, info in ds.items():
+        assert set(info.keys()) == {"es", "iso", "emoji", "group"}
+        assert "name" not in info  # la clave del dict ya es el nombre
+
+
+def test_iso_codes_validos():
+    """Los iso son minusculas de 2 letras, salvo gb-eng y gb-sct."""
+    excepciones = {"gb-eng", "gb-sct"}
+    for t in teams.TEAMS:
+        if t.iso in excepciones:
+            continue
+        assert t.iso.islower(), f"{t.name}: iso {t.iso!r} no esta en minusculas"
+        assert len(t.iso) == 2, f"{t.name}: iso {t.iso!r} no es de 2 letras"

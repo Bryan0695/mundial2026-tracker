@@ -2,48 +2,11 @@
 Calendario oficial Mundial 2026 - fase de grupos
 =================================================
 Datos reales de la FIFA: fecha, equipos, grupo y sede de cada partido.
-Banderas como emoji por codigo de pais.
+Las banderas (emoji e ISO) viven en teams.py (fuente unica); aqui solo se
+re-exportan para no romper a quien llame calendar_data.flag(...) / .iso(...).
 """
 
-# Emoji de bandera por nombre de equipo (ingles, igual que el motor).
-FLAGS = {
-    "Mexico": "🇲🇽", "Korea Republic": "🇰🇷", "Czechia": "🇨🇿", "South Africa": "🇿🇦",
-    "Canada": "🇨🇦", "Switzerland": "🇨🇭", "Bosnia and Herzegovina": "🇧🇦", "Qatar": "🇶🇦",
-    "Brazil": "🇧🇷", "Morocco": "🇲🇦", "Scotland": "🏴󠁧󠁢󠁳󠁣󠁴󠁿", "Haiti": "🇭🇹",
-    "USA": "🇺🇸", "Australia": "🇦🇺", "Paraguay": "🇵🇾", "Turkiye": "🇹🇷",
-    "Germany": "🇩🇪", "Ivory Coast": "🇨🇮", "Ecuador": "🇪🇨", "Curacao": "🇨🇼",
-    "Netherlands": "🇳🇱", "Japan": "🇯🇵", "Sweden": "🇸🇪", "Tunisia": "🇹🇳",
-    "Egypt": "🇪🇬", "Iran": "🇮🇷", "Belgium": "🇧🇪", "New Zealand": "🇳🇿",
-    "Spain": "🇪🇸", "Uruguay": "🇺🇾", "Cape Verde": "🇨🇻", "Saudi Arabia": "🇸🇦",
-    "France": "🇫🇷", "Norway": "🇳🇴", "Senegal": "🇸🇳", "Iraq": "🇮🇶",
-    "Argentina": "🇦🇷", "Austria": "🇦🇹", "Algeria": "🇩🇿", "Jordan": "🇯🇴",
-    "Colombia": "🇨🇴", "Portugal": "🇵🇹", "Congo DR": "🇨🇩", "Uzbekistan": "🇺🇿",
-    "England": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "Ghana": "🇬🇭", "Croatia": "🇭🇷", "Panama": "🇵🇦",
-}
-
-def flag(team):
-    return FLAGS.get(team, "⚽")
-
-
-# Codigo ISO de 2 letras para flag-icons (clase CSS: "fi fi-XX").
-# Para Inglaterra y Escocia se usa el codigo especial gb-eng / gb-sct.
-ISO_CODES = {
-    "Mexico": "mx", "Korea Republic": "kr", "Czechia": "cz", "South Africa": "za",
-    "Canada": "ca", "Switzerland": "ch", "Bosnia and Herzegovina": "ba", "Qatar": "qa",
-    "Brazil": "br", "Morocco": "ma", "Scotland": "gb-sct", "Haiti": "ht",
-    "USA": "us", "Australia": "au", "Paraguay": "py", "Turkiye": "tr",
-    "Germany": "de", "Ivory Coast": "ci", "Ecuador": "ec", "Curacao": "cw",
-    "Netherlands": "nl", "Japan": "jp", "Sweden": "se", "Tunisia": "tn",
-    "Egypt": "eg", "Iran": "ir", "Belgium": "be", "New Zealand": "nz",
-    "Spain": "es", "Uruguay": "uy", "Cape Verde": "cv", "Saudi Arabia": "sa",
-    "France": "fr", "Norway": "no", "Senegal": "sn", "Iraq": "iq",
-    "Argentina": "ar", "Austria": "at", "Algeria": "dz", "Jordan": "jo",
-    "Colombia": "co", "Portugal": "pt", "Congo DR": "cd", "Uzbekistan": "uz",
-    "England": "gb-eng", "Ghana": "gh", "Croatia": "hr", "Panama": "pa",
-}
-
-def iso(team):
-    return ISO_CODES.get(team, "")
+from teams import FLAGS, ISO_CODES, flag, iso  # noqa: F401 (re-export por compatibilidad)
 
 # Calendario oficial: cada partido con fecha, jornada, grupo, equipos y sede.
 # matchday = jornada real (1, 2 o 3).

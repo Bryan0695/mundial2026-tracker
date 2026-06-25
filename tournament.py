@@ -14,24 +14,9 @@ arman solas conforme ingresas marcadores.
 
 from __future__ import annotations
 
-# --- Estructura de grupos (nombres en ingles, igual que el motor Elo) ------
-
-GROUPS: dict[str, list[str]] = {
-    "A": ["Mexico", "Korea Republic", "Czechia", "South Africa"],
-    "B": ["Canada", "Switzerland", "Bosnia and Herzegovina", "Qatar"],
-    "C": ["Brazil", "Morocco", "Scotland", "Haiti"],
-    "D": ["USA", "Australia", "Paraguay", "Turkiye"],
-    "E": ["Germany", "Ivory Coast", "Ecuador", "Curacao"],
-    "F": ["Netherlands", "Japan", "Sweden", "Tunisia"],
-    "G": ["Egypt", "Iran", "Belgium", "New Zealand"],
-    "H": ["Spain", "Uruguay", "Cape Verde", "Saudi Arabia"],
-    "I": ["France", "Norway", "Senegal", "Iraq"],
-    "J": ["Argentina", "Austria", "Algeria", "Jordan"],
-    "K": ["Colombia", "Portugal", "Congo DR", "Uzbekistan"],
-    "L": ["England", "Ghana", "Croatia", "Panama"],
-}
-
-# Nota: ajusta los equipos de cada grupo si el sorteo oficial difiere.
+# La estructura de grupos y los nombres en espanol viven en teams.py (fuente
+# unica). Aqui solo se importan para no duplicar el universo de selecciones.
+from teams import GROUPS, DISPLAY_ES, team_es
 
 
 def all_group_matches() -> list[dict]:
@@ -55,31 +40,6 @@ def all_group_matches() -> list[dict]:
                 "home_es": team_es(h), "away_es": team_es(a),
             })
     return matches
-
-
-# Nombres bonitos en espanol para mostrar (opcional).
-DISPLAY_ES: dict[str, str] = {
-    "Mexico": "Mexico", "Korea Republic": "Corea Rep.", "Czechia": "R. Checa",
-    "South Africa": "Sudafrica", "Canada": "Canada", "Switzerland": "Suiza",
-    "Bosnia and Herzegovina": "Bosnia", "Qatar": "Qatar", "Brazil": "Brasil",
-    "Morocco": "Marruecos", "Scotland": "Escocia", "Haiti": "Haiti",
-    "USA": "USA", "Australia": "Australia", "Paraguay": "Paraguay",
-    "Tunisia": "Tunez", "Germany": "Alemania", "Ivory Coast": "C. Marfil",
-    "Ecuador": "Ecuador", "Curacao": "Curazao", "Netherlands": "P. Bajos",
-    "Japan": "Japon", "Sweden": "Suecia", "Egypt": "Egipto", "Iran": "Iran",
-    "Belgium": "Belgica", "New Zealand": "N. Zelanda", "Spain": "Espana",
-    "Uruguay": "Uruguay", "Cape Verde": "Cabo Verde", "Saudi Arabia": "A. Saudita",
-    "France": "Francia", "Norway": "Noruega", "Senegal": "Senegal", "Iraq": "Iraq",
-    "Argentina": "Argentina", "Austria": "Austria", "Algeria": "Argelia",
-    "Jordan": "Jordania", "Colombia": "Colombia", "Portugal": "Portugal",
-    "Congo DR": "Congo RD", "Uzbekistan": "Uzbekistan", "England": "Inglaterra",
-    "Ghana": "Ghana", "Croatia": "Croacia", "Panama": "Panama",
-    "Turkiye": "Turquia",
-}
-
-
-def team_es(name: str) -> str:
-    return DISPLAY_ES.get(name, name)
 
 
 def group_of(team: str) -> str | None:

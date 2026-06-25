@@ -34,6 +34,7 @@ from fastapi.staticfiles import StaticFiles
 from prediction import PredictionEngine
 import tournament
 import calendar_data
+import teams
 
 load_dotenv()
 
@@ -90,6 +91,16 @@ def _read_json(path: str, default):
         except OSError:
             pass
         return default
+
+
+def _played_index(saved: list) -> dict:
+    """
+    Indice de partidos ya jugados: {(home, away): (home_goals, away_goals)}.
+    Se usa tanto en el calendario como en las predicciones para no duplicar
+    la misma construccion en dos endpoints.
+    """
+    return {(r["home"], r["away"]): (r["home_goals"], r["away_goals"])
+            for r in saved}
 
 
 def _save_results(results: list):
@@ -380,6 +391,16 @@ def reset_all():
 
 # --- Endpoints de TORNEO (tablas, terceros, dieciseisavos) -----------------
 
+@app.get("/api/teams")
+def get_teams():
+    """
+    Fuente unica de equipos: nombre en espanol, ISO de bandera, emoji y grupo.
+    El frontend lo consume al cargar para construir su lookup de banderas y
+    nombres, en vez de hardcodearlo (elimina la duplicacion en panel.html).
+    """
+    return {"teams": teams.as_dataset()}
+
+
 @app.get("/api/groups")
 def get_groups():
     """Estructura de los 12 grupos (para mostrar el calendario)."""
@@ -411,8 +432,7 @@ def round_of_32_endpoint():
 @app.get("/api/calendar")
 def get_calendar():
     """Calendario oficial: 72 partidos con fecha, sede, banderas y jornada real."""
-    played = {(r["home"], r["away"]): (r["home_goals"], r["away_goals"])
-              for r in saved_results}
+    played = _played_index(saved_results)
     matches = []
     for m in calendar_data.OFFICIAL_CALENDAR:
         key = (m["home"], m["away"])
@@ -489,8 +509,7 @@ def all_predictions(only_upcoming: bool = True):
     only_upcoming=True: solo los que aun no se han jugado.
     Los ya jugados incluyen su resultado real.
     """
-    played = {(r["home"], r["away"]): (r["home_goals"], r["away_goals"])
-              for r in saved_results}
+    played = _played_index(saved_results)
     out = []
     for m in calendar_data.OFFICIAL_CALENDAR:
         key = (m["home"], m["away"])
