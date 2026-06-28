@@ -93,14 +93,35 @@ def _read_json(path: str, default):
         return default
 
 
-def _played_index(saved: list) -> dict:
+def _is_final(r: dict) -> bool:
     """
-    Indice de partidos ya jugados: {(home, away): (home_goals, away_goals)}.
-    Se usa tanto en el calendario como en las predicciones para no duplicar
-    la misma construccion en dos endpoints.
+    Un resultado cuenta como finalizado salvo que sea explicitamente "live".
+    Retrocompatibilidad: los resultados viejos (sin campo "status") se asumen
+    finalizados, asi el resultados.json antiguo sigue funcionando igual.
     """
-    return {(r["home"], r["away"]): (r["home_goals"], r["away_goals"])
-            for r in saved}
+    return r.get("status", "final") == "final"
+
+
+def _result_index(saved: list) -> dict:
+    """
+    Indice de partidos con marcador: {(home, away): registro_completo}.
+    Incluye tanto los parciales en vivo como los finalizados; quien necesite
+    distinguir mira el campo "status" del registro (via _is_final). Se usa en
+    el calendario y en las predicciones para no duplicar la construccion.
+    """
+    return {(r["home"], r["away"]): r for r in saved}
+
+
+def _feed_elo(eng: PredictionEngine, results: list) -> None:
+    """
+    Alimenta el motor Elo con una lista de resultados de grupo, replicando
+    SOLO los finalizados. Los marcadores en vivo NO mueven el Elo (un partido
+    en curso no debe alterar ratings ni predicciones hasta que termine).
+    """
+    for r in results:
+        if _is_final(r):
+            eng.update_after_match(r["home"], r["away"],
+                                   r["home_goals"], r["away_goals"])
 
 
 def _save_results(results: list):
@@ -115,17 +136,16 @@ def _save_ko_results(ko: dict):
 
 def _rebuild_engine() -> None:
     """
-    Reconstruye los ratings Elo desde cero replicando TODOS los resultados:
+    Reconstruye los ratings Elo desde cero replicando los resultados FINALIZADOS:
     primero los de grupo, luego los de eliminatoria en orden de ronda (F-003, F-005).
     Esto evita el doble conteo (al corregir un marcador) y la deriva de Elo
-    (los KO ahora si se replican al reiniciar).
+    (los KO ahora si se replican al reiniciar). Los marcadores en vivo (status
+    "live") se ignoran aqui: cuentan en las tablas, pero no en el Elo.
     """
     global engine
     engine = PredictionEngine()
-    # 1) Resultados de grupo.
-    for r in saved_results:
-        engine.update_after_match(r["home"], r["away"],
-                                  r["home_goals"], r["away_goals"])
+    # 1) Resultados de grupo: SOLO los finalizados (los live no mueven el Elo).
+    _feed_elo(engine, saved_results)
     # 2) Resultados de eliminatoria, en el orden correcto de las rondas.
     standings = tournament.compute_standings(saved_results)
     bracket = tournament.build_bracket(standings, ko_results)
@@ -343,17 +363,26 @@ def predict_match(home: str, away: str, neutral: bool = True):
 
 @app.post("/api/update-result", dependencies=[Depends(require_token)])
 def update_result(home: str, away: str, home_goals: int, away_goals: int,
-                  neutral: bool = True):
+                  neutral: bool = True, status: str = "final"):
     """
     Registra (o corrige) un resultado de grupo. Usa UPSERT por (home, away):
     si el partido ya existia, lo reemplaza en vez de duplicarlo (F-003).
     Luego reconstruye los ratings Elo desde cero para no acumular (F-003/F-005).
+
+    status:
+      - "final" (default): marcador definitivo. Mueve el Elo y las predicciones.
+      - "live": marcador en vivo. Cuenta en las tablas de grupo pero NO en el
+        Elo. Llamar varias veces con "live" actualiza el mismo partido (upsert),
+        no lo duplica; al pasar a "final" el Elo ya si lo replica.
     """
     validate_teams(home, away)  # F-007: rechaza equipos desconocidos
+    if status not in ("live", "final"):
+        raise HTTPException(status_code=422,
+                            detail="status debe ser 'live' o 'final'")
 
     entry = {"home": home, "away": away,
              "home_goals": home_goals, "away_goals": away_goals,
-             "ts": time.time()}
+             "status": status, "ts": time.time()}
     # Upsert: busca si ya existe ese partido.
     idx = next((i for i, r in enumerate(saved_results)
                 if r["home"] == home and r["away"] == away), None)
@@ -361,11 +390,13 @@ def update_result(home: str, away: str, home_goals: int, away_goals: int,
         saved_results.append(entry)
     else:
         saved_results[idx] = entry
-        logger.info("Resultado corregido: %s %s-%s %s", home, home_goals, away_goals, away)
+        logger.info("Resultado actualizado (%s): %s %s-%s %s",
+                    status, home, home_goals, away_goals, away)
 
     _save_results(saved_results)
-    _rebuild_engine()  # reconstruye Elo sin doble conteo
-    return {"status": "guardado", "upsert": "update" if idx is not None else "insert"}
+    _rebuild_engine()  # reconstruye Elo sin doble conteo (ignora los live)
+    return {"status": "guardado", "match_status": status,
+            "upsert": "update" if idx is not None else "insert"}
 
 
 @app.get("/api/results")
@@ -432,7 +463,7 @@ def round_of_32_endpoint():
 @app.get("/api/calendar")
 def get_calendar():
     """Calendario oficial: 72 partidos con fecha, sede, banderas y jornada real."""
-    played = _played_index(saved_results)
+    results = _result_index(saved_results)
     matches = []
     for m in calendar_data.OFFICIAL_CALENDAR:
         key = (m["home"], m["away"])
@@ -447,11 +478,19 @@ def get_calendar():
             "home_flag": calendar_data.flag(m["home"]),
             "away_flag": calendar_data.flag(m["away"]),
         }
-        if key in played:
-            row["played"] = True
-            row["home_goals"], row["away_goals"] = played[key]
-        else:
+        rec = results.get(key)
+        if rec is None:
+            row["status"] = "pending"
             row["played"] = False
+        else:
+            st = "final" if _is_final(rec) else "live"
+            row["status"] = st
+            # "played" se mantiene con su semantica antigua (True = finalizado)
+            # para no romper a quien ya lo consumiera; el marcador en vivo se
+            # distingue por status="live".
+            row["played"] = st == "final"
+            row["home_goals"] = rec["home_goals"]
+            row["away_goals"] = rec["away_goals"]
         matches.append(row)
     return {"calendar": matches}
 
@@ -509,11 +548,14 @@ def all_predictions(only_upcoming: bool = True):
     only_upcoming=True: solo los que aun no se han jugado.
     Los ya jugados incluyen su resultado real.
     """
-    played = _played_index(saved_results)
+    results = _result_index(saved_results)
     out = []
     for m in calendar_data.OFFICIAL_CALENDAR:
         key = (m["home"], m["away"])
-        is_played = key in played
+        rec = results.get(key)
+        # Solo los FINALIZADOS cuentan como "jugados" para las predicciones:
+        # un partido en vivo sigue mostrando su prediccion (el Elo lo ignora).
+        is_played = rec is not None and _is_final(rec)
         if only_upcoming and is_played:
             continue
         pred = engine.predict(m["home"], m["away"])
@@ -537,7 +579,7 @@ def all_predictions(only_upcoming: bool = True):
             "played": is_played,
         }
         if is_played:
-            row["real_home"], row["real_away"] = played[key]
+            row["real_home"], row["real_away"] = rec["home_goals"], rec["away_goals"]
         out.append(row)
     return {"predictions": out, "total": len(out)}
 

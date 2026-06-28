@@ -18,6 +18,10 @@ from __future__ import annotations
 # unica). Aqui solo se importan para no duplicar el universo de selecciones.
 from teams import GROUPS, DISPLAY_ES, team_es
 
+# Matriz oficial FIFA (Annex C): las 495 combinaciones de 8 grupos de terceros
+# y a que partido va cada uno. Es la fuente de verdad de la asignacion.
+import r32_matrix
+
 
 def all_group_matches() -> list[dict]:
     """
@@ -136,48 +140,76 @@ def best_thirds(standings: dict[str, list[dict]]) -> dict:
 
 # --- Construccion de dieciseisavos -----------------------------------------
 
+# Estructura oficial FIFA 2026 de los 16avos (partidos 73-88), en orden.
+# Cada entrada: (codigo, fuente_local, fuente_visitante). Las fuentes son:
+#   "1X" -> 1ro del grupo X     "2X" -> 2do del grupo X
+#   "3rd" -> uno de los 8 mejores terceros (el grupo permitido lo fija THIRD_SLOTS)
+# Fuente: calendario/reglamento oficial FIFA (CONMEBOL/UEFA/etc.).
+OFFICIAL_R32 = [
+    ("P73", "2A", "2B"),    # 2A v 2B
+    ("P74", "1E", "3rd"),   # 1E (Alemania) v 3ro
+    ("P75", "1F", "2C"),    # 1F v 2C
+    ("P76", "1C", "2F"),    # 1C v 2F
+    ("P77", "1I", "3rd"),   # 1I v 3ro
+    ("P78", "2E", "2I"),    # 2E v 2I
+    ("P79", "1A", "3rd"),   # 1A (Mexico) v 3ro
+    ("P80", "1L", "3rd"),   # 1L v 3ro
+    ("P81", "1D", "3rd"),   # 1D (USA) v 3ro
+    ("P82", "1G", "3rd"),   # 1G v 3ro
+    ("P83", "2K", "2L"),    # 2K v 2L
+    ("P84", "1H", "2J"),    # 1H v 2J
+    ("P85", "1B", "3rd"),   # 1B (Suiza) v 3ro
+    ("P86", "1J", "2H"),    # 1J (Argentina) v 2H
+    ("P87", "1K", "3rd"),   # 1K v 3ro
+    ("P88", "2D", "2G"),    # 2D v 2G
+]
+
+# Conjunto de grupos permitidos por partido segun la regla oficial FIFA: un
+# partido que recibe tercero SOLO puede recibirlo de estos grupos. La matriz
+# r32_matrix respeta estos conjuntos; aqui se conservan para validarlo en los
+# tests (un tercero nunca debe caer en un slot fuera de su conjunto).
+THIRD_SLOTS = {
+    "P74": frozenset("ABCDF"),
+    "P77": frozenset("CDFGH"),
+    "P79": frozenset("CEFHI"),
+    "P80": frozenset("EHIJK"),
+    "P81": frozenset("BEFIJ"),
+    "P82": frozenset("AEHIJ"),
+    "P85": frozenset("EFGIJ"),
+    "P87": frozenset("DEIJL"),
+}
+
+
 def round_of_32(standings: dict[str, list[dict]]) -> list[dict]:
     """
     Arma los 16 cruces de dieciseisavos con la estructura OFICIAL FIFA 2026
-    (partidos 73-88). El emparejamiento exacto viene del calendario oficial.
-
-    Cada entrada define de donde sale el local y el visitante:
-      ("1A") = 1ro del grupo A, ("2B") = 2do del grupo B, ("3rd") = mejor tercero.
+    (partidos 73-88). La asignacion de los 8 mejores terceros sale de la matriz
+    oficial (Annex C) via r32_matrix.lookup: se toman los 8 grupos que aportan
+    tercero y la matriz dicta que grupo va a cada partido. Si todavia no hay 8
+    terceros definidos (o la combinacion no esta en la matriz), los slots de
+    tercero quedan en "Por definir" sin romper los cruces de rival fijo.
     """
     def first(g):  return standings[g][0] if len(standings.get(g, [])) >= 1 else None
     def second(g): return standings[g][1] if len(standings.get(g, [])) >= 2 else None
+    def third(g):  return standings[g][2] if g and len(standings.get(g, [])) >= 3 else None
 
-    thirds_data = best_thirds(standings)
-    qualified_thirds = list(thirds_data["qualified"])
+    qualified_thirds = best_thirds(standings)["qualified"]
+    third_groups = [t["group"] for t in qualified_thirds]
+    # {codigo_partido: letra_grupo} segun Annex C, o None si no hay 8 terceros.
+    slot_map = r32_matrix.lookup(third_groups)
 
-    def next_third():
-        return qualified_thirds.pop(0) if qualified_thirds else None
-
-    # Estructura oficial FIFA (partidos 73-88), en orden.
-    # (codigo_partido, fuente_local, fuente_visitante)
-    official = [
-        ("P73", second("A"), second("B")),     # 2A v 2B
-        ("P74", first("E"), "3rd"),             # 1E (Alemania) v 3ro
-        ("P75", first("F"), second("C")),       # 1F v 2C
-        ("P76", first("C"), second("F")),       # 1C v 2F
-        ("P77", first("I"), "3rd"),             # 1I v 3ro
-        ("P78", second("E"), second("I")),      # 2E v 2I
-        ("P79", first("A"), "3rd"),             # 1A (Mexico) v 3ro
-        ("P80", first("L"), "3rd"),             # 1L v 3ro
-        ("P81", first("D"), "3rd"),             # 1D (USA) v 3ro
-        ("P82", first("G"), "3rd"),             # 1G v 3ro
-        ("P83", second("K"), second("L")),      # 2K v 2L
-        ("P84", first("H"), second("J")),       # 1H v 2J
-        ("P85", first("B"), "3rd"),             # 1B v 3ro
-        ("P86", first("J"), second("H")),       # 1J (Argentina) v 2H
-        ("P87", first("K"), "3rd"),             # 1K v 3ro
-        ("P88", second("D"), second("G")),      # 2D v 2G
-    ]
+    def resolve(code: str, src: str):
+        if src == "3rd":
+            if not slot_map:
+                return None
+            return third(slot_map.get(code))
+        pos, group = src[0], src[1]
+        return first(group) if pos == "1" else second(group)
 
     matches = []
-    for code, home_src, away_src in official:
-        home = next_third() if home_src == "3rd" else home_src
-        away = next_third() if away_src == "3rd" else away_src
+    for code, home_src, away_src in OFFICIAL_R32:
+        home = resolve(code, home_src)
+        away = resolve(code, away_src)
         h_name = home["team"] if home else None
         a_name = away["team"] if away else None
         matches.append({

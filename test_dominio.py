@@ -10,6 +10,7 @@ Instala pytest primero:  pip install pytest
 import prediction
 import tournament
 import teams
+import main
 
 
 # --- Tests del motor de prediccion -----------------------------------------
@@ -152,6 +153,73 @@ def test_bracket_propaga_ganador():
     assert p73["winner"] in (p90["home"], p90["away"])
 
 
+def _standings_todos_completos():
+    """Genera resultados para los 12 grupos completos (equipo 0 gana todo) y
+    devuelve sus tablas. Sirve para probar la asignacion de terceros."""
+    results = []
+    for equipos in tournament.GROUPS.values():
+        results += [
+            {"home": equipos[0], "away": equipos[1], "home_goals": 2, "away_goals": 0},
+            {"home": equipos[2], "away": equipos[3], "home_goals": 1, "away_goals": 0},
+            {"home": equipos[0], "away": equipos[2], "home_goals": 2, "away_goals": 0},
+            {"home": equipos[1], "away": equipos[3], "home_goals": 1, "away_goals": 0},
+            {"home": equipos[3], "away": equipos[0], "home_goals": 0, "away_goals": 3},
+            {"home": equipos[1], "away": equipos[2], "home_goals": 2, "away_goals": 1},
+        ]
+    return tournament.compute_standings(results)
+
+
+def test_terceros_respetan_grupos_permitidos():
+    """Cada tercero asignado debe venir de un grupo del conjunto permitido FIFA
+    para ese partido (THIRD_SLOTS). Ninguno cae en un slot no autorizado."""
+    st = _standings_todos_completos()
+    matches = {m["code"]: m for m in tournament.round_of_32(st)}
+    grupo_de = tournament.group_of
+    for code, allowed in tournament.THIRD_SLOTS.items():
+        # El tercero es el visitante en todos los slots oficiales.
+        away = matches[code]["away"]
+        if away is None:
+            continue  # slot sin cubrir (datos incompletos): permitido
+        assert grupo_de(away) in allowed, (
+            f"{code}: tercero {away} (grupo {grupo_de(away)}) "
+            f"no esta en el conjunto permitido {sorted(allowed)}"
+        )
+
+
+def test_nadie_enfrenta_su_propio_grupo():
+    """En 16avos ningun equipo puede jugar contra otro de su mismo grupo."""
+    st = _standings_todos_completos()
+    for m in tournament.round_of_32(st):
+        if m["home"] and m["away"]:
+            assert tournament.group_of(m["home"]) != tournament.group_of(m["away"]), (
+                f"{m['code']}: {m['home']} y {m['away']} son del mismo grupo"
+            )
+
+
+def test_round_of_32_usa_matriz_oficial():
+    """round_of_32 debe sembrar los terceros segun r32_matrix.lookup: para la
+    combinacion de 8 grupos que clasifican, cada slot recibe el tercero del
+    grupo que dicta la matriz oficial, y nadie juega contra su propio grupo."""
+    import r32_matrix
+    st = _standings_todos_completos()
+
+    # Los 8 grupos que aportan tercero con este fixture.
+    third_groups = [t["group"] for t in tournament.best_thirds(st)["qualified"]]
+    expected = r32_matrix.lookup(third_groups)
+    assert expected is not None, "La combinacion deberia existir en la matriz"
+
+    matches = {m["code"]: m for m in tournament.round_of_32(st)}
+    for code, letter in expected.items():
+        # El tercero (visitante) debe ser el 3ro del grupo que dicta la matriz.
+        esperado = st[letter][2]["team"]
+        assert matches[code]["away"] == esperado, (
+            f"{code}: se esperaba el 3ro de {letter} ({esperado}), "
+            f"llego {matches[code]['away']}"
+        )
+        # Y nunca contra alguien de su propio grupo.
+        assert tournament.group_of(matches[code]["home"]) != letter
+
+
 # --- Tests de la fuente unica de equipos (teams.py) ------------------------
 
 def test_teams_son_48():
@@ -202,3 +270,43 @@ def test_iso_codes_validos():
             continue
         assert t.iso.islower(), f"{t.name}: iso {t.iso!r} no esta en minusculas"
         assert len(t.iso) == 2, f"{t.name}: iso {t.iso!r} no es de 2 letras"
+
+
+# --- Tests de seguimiento EN VIVO (status live/final) ----------------------
+
+def test_live_cuenta_en_standings_pero_no_en_elo():
+    """Un partido en vivo suma en la tabla de grupo, pero NO mueve el Elo."""
+    live = [{"home": "Mexico", "away": "South Africa",
+             "home_goals": 1, "away_goals": 0, "status": "live"}]
+    # La tabla SI lo cuenta (compute_standings ignora el status, suma todo).
+    st = tournament.compute_standings(live)
+    mex = next(r for r in st["A"] if r["team"] == "Mexico")
+    assert mex["pts"] == 3 and mex["pj"] == 1
+    # El Elo NO se mueve con el parcial en vivo.
+    eng = prediction.PredictionEngine()
+    antes = eng.get_elo("Mexico")
+    main._feed_elo(eng, live)
+    assert eng.get_elo("Mexico") == antes
+
+
+def test_al_finalizar_el_elo_si_cambia():
+    """Pasar de 'live' a 'final' debe mover el Elo (antes no, despues si)."""
+    eng = prediction.PredictionEngine()
+    antes = eng.get_elo("Mexico")
+    main._feed_elo(eng, [{"home": "Mexico", "away": "South Africa",
+                          "home_goals": 1, "away_goals": 0, "status": "live"}])
+    assert eng.get_elo("Mexico") == antes  # en vivo no cambia nada
+    main._feed_elo(eng, [{"home": "Mexico", "away": "South Africa",
+                          "home_goals": 1, "away_goals": 0, "status": "final"}])
+    assert eng.get_elo("Mexico") > antes  # al finalizar si sube
+
+
+def test_falta_status_se_trata_como_final():
+    """Retrocompatibilidad: un resultado sin campo 'status' cuenta como final."""
+    sin_status = {"home": "Mexico", "away": "South Africa",
+                  "home_goals": 1, "away_goals": 0}
+    assert main._is_final(sin_status) is True
+    eng = prediction.PredictionEngine()
+    antes = eng.get_elo("Mexico")
+    main._feed_elo(eng, [sin_status])
+    assert eng.get_elo("Mexico") > antes  # se replico como final
